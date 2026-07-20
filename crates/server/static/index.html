@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CipherStream - Video Engine</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tus-js-client@3.1.1/dist/tus.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #121212; color: #fff; margin: 0; padding: 20px; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .card { background: #1e1e1e; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+        h1 { color: #42b883; }
+        button { background: #42b883; color: #121212; border: none; padding: 10px 20px; cursor: pointer; border-radius: 4px; font-weight: bold; }
+        button:hover { background: #33a06f; }
+        video { width: 100%; border-radius: 8px; background: #000; margin-top: 15px; }
+    </style>
+</head>
+<body>
+    <div id="app" class="container">
+        <h1>🛡️ CipherStream Studio</h1>
+        
+        <div class="card">
+            <h3>Upload Video</h3>
+            <button @click="simulateUpload">Upload New Video</button>
+            <p v-if="uploadStatus">{{ uploadStatus }}</p>
+            <p v-if="processingStatus">{{ processingStatus }}</p>
+        </div>
+
+        <div class="card" v-if="videoId">
+            <h3>Playback</h3>
+            <p>Playing video ID: {{ videoId }}</p>
+            <video id="video-player" controls></video>
+            <button @click="playStream" style="margin-top:10px;">Load Stream</button>
+        </div>
+    </div>
+
+    <script>
+        const { createApp, ref } = Vue;
+
+        createApp({
+            setup() {
+                const uploadStatus = ref('');
+                const processingStatus = ref('');
+                const videoId = ref('');
+
+                const simulateUpload = () => {
+                    const fileInput = document.createElement('input');
+                    fileInput.type = 'file';
+                    fileInput.accept = 'video/*';
+                    
+                    fileInput.onchange = e => {
+                        const file = e.target.files[0];
+                        if (!file) return;
+
+                        uploadStatus.value = `Starting upload for ${file.name}...`;
+
+                        // Initialize a new tus upload
+                        const upload = new tus.Upload(file, {
+                            // Point this to our background rustus server (port 1081)
+                            endpoint: "http://127.0.0.1:1081/files/",
+                            retryDelays: [0, 3000, 5000, 10000, 20000],
+                            metadata: {
+                                filename: file.name,
+                                filetype: file.type
+                            },
+                            onError: function(error) {
+                                uploadStatus.value = "Upload failed: " + error;
+                            },
+                            onProgress: function(bytesUploaded, bytesTotal) {
+                                const percentage = ((bytesUploaded / bytesTotal) * 100).toFixed(2);
+                                uploadStatus.value = `Uploading... ${percentage}%`;
+                            },
+                            onSuccess: async function() {
+                                uploadStatus.value = "Upload complete! Queueing for transcoding...";
+                                
+                                // The file URL from TUS
+                                const tusUrl = upload.url;
+                                
+                                // In a full implementation, we now POST the tusUrl to our Axum backend
+                                // to register the Job in SQLite and queue it for FFmpeg transcoding.
+                                try {
+                                    const res = await fetch('/upload', { 
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ tus_url: tusUrl })
+                                    });
+                                    if (!res.ok) {
+                                        throw new Error(await res.text());
+                                    }
+                                    const result = await res.json();
+                                    uploadStatus.value = `Upload ${result.status}. Video ID: ${result.video_id}`;
+                                    videoId.value = result.video_id;
+                                    pollStatus(result.status_url);
+                                } catch(e) {
+                                    uploadStatus.value = "Backend registration failed: " + e;
+                                }
+                            }
+                        });
+
+                        upload.start();
+                    };
+                    fileInput.click();
+                };
+
+                const pollStatus = async (statusUrl) => {
+                    processingStatus.value = 'Waiting for transcoder...';
+                    const timer = setInterval(async () => {
+                        try {
+                            const res = await fetch(statusUrl);
+                            if (!res.ok) return;
+                            const status = await res.json();
+                            processingStatus.value = `Engine status: ${status.state}`;
+                            if (status.state === 'ready') {
+                                clearInterval(timer);
+                                playStream();
+                            }
+                            if (status.state === 'failed') {
+                                clearInterval(timer);
+                                processingStatus.value = `Transcode failed: ${status.error}`;
+                            }
+                        } catch (error) {
+                            processingStatus.value = `Status check failed: ${error}`;
+                        }
+                    }, 1000);
+                };
+
+                const playStream = () => {
+                    const video = document.getElementById('video-player');
+                    const hlsSrc = `/stream/${videoId.value}/playlist.m3u8`;
+                    const mp4Src = `/stream/${videoId.value}/source.mp4`;
+
+                    if (Hls.isSupported()) {
+                        const hls = new Hls();
+                        hls.loadSource(hlsSrc);
+                        hls.attachMedia(video);
+                        hls.on(Hls.Events.MANIFEST_PARSED, function() {
+                            video.play();
+                        });
+                        hls.on(Hls.Events.ERROR, function() {
+                            hls.destroy();
+                            video.src = mp4Src;
+                            video.play();
+                        });
+                    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                        video.src = hlsSrc;
+                        video.addEventListener('loadedmetadata', function() {
+                            video.play();
+                        });
+                        video.addEventListener('error', function() {
+                            video.src = mp4Src;
+                            video.play();
+                        }, { once: true });
+                    } else {
+                        video.src = mp4Src;
+                        video.play();
+                    }
+                };
+
+                return { uploadStatus, processingStatus, videoId, simulateUpload, playStream }
+            }
+        }).mount('#app')
+    </script>
+</body>
+</html>

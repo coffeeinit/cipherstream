@@ -1,0 +1,107 @@
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║              CipherStream – Example Configuration               ║
+# ║  Copy this file to config.toml and edit before running.         ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+# ─── Server ──────────────────────────────────────────────────────────────────
+[server]
+# Address and port the HTTP server listens on.
+# For Docker / behind a reverse proxy, change to "0.0.0.0:8080".
+bind_addr = "127.0.0.1:8080"
+
+# ─── Database ────────────────────────────────────────────────────────────────
+[database]
+# Path to the SQLite database file.
+# The parent directory is created automatically on first run.
+# Tables created on startup (idempotent):
+#   videos, video_media_info, video_renditions, upload_chunks, video_events
+path = "data/cipherstream.db"
+
+# ─── Storage ─────────────────────────────────────────────────────────────────
+[storage]
+# "local"  →  store HLS output + uploads on the local filesystem under data_dir.
+# "s3"     →  store in an S3-compatible bucket (AWS, MinIO, Garage, etc.).
+type = "local"
+
+# Root directory used by the local backend.
+#   uploads go to  data_dir/uploads/
+#   HLS output to  data_dir/hls/
+data_dir = "data"
+
+# ── S3 / MinIO settings (ignored when type = "local") ────────────────────────
+# endpoint     – omit for real AWS; set for MinIO or other S3-compatible stores.
+# endpoint     = "http://localhost:9000"
+# bucket       = "cipherstream-videos"
+# region       = "us-east-1"
+
+# Credentials – prefer environment variables over storing secrets in this file:
+#   AWS_ACCESS_KEY_ID     / access_key_id
+#   AWS_SECRET_ACCESS_KEY / secret_access_key
+# access_key_id     = ""
+# secret_access_key = ""
+
+# ─── TUS Upload Server ───────────────────────────────────────────────────────
+[tus]
+# Whether to spawn the embedded rustus TUS server on startup.
+enabled = true
+
+# Host/port the rustus process listens on (separate from the main HTTP port).
+host    = "0.0.0.0"
+port    = 1081
+
+# Path to the compiled rustus binary.
+# Default below assumes you built the workspace with `cargo build --release`.
+binary_path = "./target/release/rustus"
+
+# ─── Transcoder ──────────────────────────────────────────────────────────────
+[transcoder]
+# Number of renditions that may be transcoded concurrently.
+parallelism = 4
+
+# Absolute or relative path to the ffmpeg binary.
+# Omit to search PATH automatically.
+# ffmpeg_path  = "/usr/bin/ffmpeg"
+
+# Absolute or relative path to the ffprobe binary (used for source inspection).
+# Omit to search PATH automatically.
+# ffprobe_path = "/usr/bin/ffprobe"
+
+# ── Quality ladder ─────────────────────────────────────────────────────────
+# One [[transcoder.renditions]] block per output quality.
+# The transcoder produces one HLS variant playlist per rendition and assembles
+# them into a master.m3u8.  Remove rows to disable a quality level.
+# HLS output layout:
+#   data/hls/<video-id>/master.m3u8
+#   data/hls/<video-id>/360p/index.m3u8  +  segment000.ts …
+#   data/hls/<video-id>/720p/index.m3u8  +  segment000.ts …
+#   data/hls/<video-id>/1080p/index.m3u8 +  segment000.ts …
+
+[[transcoder.renditions]]
+label               = "360p"
+width               = 640
+height              = 360
+video_bitrate_kbps  = 800
+audio_bitrate_kbps  = 128
+
+[[transcoder.renditions]]
+label               = "720p"
+width               = 1280
+height              = 720
+video_bitrate_kbps  = 2500
+audio_bitrate_kbps  = 128
+
+[[transcoder.renditions]]
+label               = "1080p"
+width               = 1920
+height              = 1080
+video_bitrate_kbps  = 5000
+audio_bitrate_kbps  = 192
+
+# ─── Signing / URL settings ──────────────────────────────────────────────────
+[signing]
+# Lifetime of S3 pre-signed stream URLs (seconds).  Ignored for local storage.
+url_ttl_seconds = 3600
+
+# Optional base URL prepended to local stream paths.
+# Useful when CipherStream sits behind a reverse proxy or CDN.
+# base_url = "https://cdn.example.com"

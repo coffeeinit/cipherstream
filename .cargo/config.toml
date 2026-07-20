@@ -1,0 +1,4 @@
+[build]
+# This forces the build directory into the native Linux filesystem
+# This fixes the "Permission denied (os error 13)" bug when building Rust on WSL mounted drives (/mnt/c, /mnt/d)
+target-dir = "/tmp/cargo-target/cipherstream"
