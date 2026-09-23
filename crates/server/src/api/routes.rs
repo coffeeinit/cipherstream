@@ -1,6 +1,6 @@
 use axum::{
     body::Body,
-    extract::{Path, State},
+    extract::{Multipart, Path, State},
     http::{header, HeaderValue, StatusCode},
     response::{Html, Response},
     Json,
@@ -11,6 +11,7 @@ use std::{
     sync::Arc,
 };
 use uuid::Uuid;
+use tokio::io::AsyncWriteExt;
 use crate::api::AppState;
 use crate::core::traits::Job;
 use crate::db::queries;
@@ -31,6 +32,71 @@ pub async fn health_handler() -> Json<HealthResponse> {
 }
 
 // ── Upload registration ───────────────────────────────────────────────────────
+
+/// Upload a complete local file and enqueue it for FFmpeg/HLS processing.
+/// This is the primary beta path; resumable TUS registration remains separate.
+pub async fn multipart_upload_handler(
+    State(state): State<Arc<AppState>>,
+    mut multipart: Multipart,
+) -> Result<Json<UploadResponse>, (StatusCode, String)> {
+    let mut saved: Option<(PathBuf, String, i64)> = None;
+
+    while let Some(mut field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid multipart upload: {e}")))?
+    {
+        if field.name() != Some("file") {
+            continue;
+        }
+
+        let video_id = new_video_id();
+        let filename = sanitize_segment(field.file_name().unwrap_or("upload.bin"));
+        let filename = if filename.is_empty() { "upload.bin".to_string() } else { filename };
+        let path = state.upload_dir.join(format!("{video_id}-{filename}"));
+        let mut output = tokio::fs::File::create(&path)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Could not create upload: {e}")))?;
+        let mut size = 0_i64;
+        while let Some(chunk) = field
+            .chunk()
+            .await
+            .map_err(|e| (StatusCode::BAD_REQUEST, format!("Could not read upload: {e}")))?
+        {
+            size += chunk.len() as i64;
+            output
+                .write_all(&chunk)
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Could not save upload: {e}")))?;
+        }
+        saved = Some((path, filename, size));
+        break;
+    }
+
+    let (input_file, filename, file_size) = saved
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, "Multipart field `file` is required.".to_string()))?;
+    let video_id = new_video_id();
+
+    queries::insert_video(
+        &state.db, &video_id, &filename, Some(file_size), "local", None,
+    )
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    queries::log_event(&state.db, &video_id, "upload_complete", Some(&filename)).await.ok();
+    state.jobs.queued(&video_id).await;
+    state.queue.publish(Job {
+        id: video_id.clone(),
+        input_file: input_file.to_string_lossy().into_owned(),
+    }).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    queries::log_event(&state.db, &video_id, "queued", None).await.ok();
+
+    Ok(Json(UploadResponse {
+        video_id: video_id.clone(),
+        status: "queued",
+        manifest_url: format!("/stream/{video_id}/master.m3u8"),
+        status_url: format!("/api/videos/{video_id}/status"),
+    }))
+}
 
 pub async fn upload_handler(
     State(state): State<Arc<AppState>>,
@@ -90,7 +156,7 @@ pub async fn upload_handler(
                 &state.db,
                 &video_id,
                 tus_upload_id.as_deref().unwrap_or(""),
-                i as i64,
+                i as i32,
                 chunk.offset_bytes,
                 chunk.size_bytes,
             )

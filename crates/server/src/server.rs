@@ -27,7 +27,7 @@ pub async fn run_server() -> Result<(), String> {
 
     // Initialise SQLite connection pool + apply schema
     let pool = Arc::new(
-        db::init_pool(&config.database.path)
+        db::init_pool(&config.database.path, config.database.max_connections)
             .await
             .map_err(|e| format!("Database init failed: {e}"))?,
     );

@@ -1,6 +1,5 @@
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 
 // ── Domain types ──────────────────────────────────────────────────────────────
 
@@ -15,8 +14,8 @@ pub struct VideoRow {
     pub manifest_url: Option<String>,
     pub tus_upload_id: Option<String>,
     pub error: Option<String>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, sqlx::FromRow)]
@@ -31,7 +30,7 @@ pub struct VideoMediaInfo {
     pub audio_channels: Option<i32>,
     pub bitrate_kbps: Option<i32>,
     pub format: Option<String>,
-    pub probed_at: DateTime<Utc>,
+    pub probed_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, sqlx::FromRow)]
@@ -48,7 +47,7 @@ pub struct VideoRendition {
     pub segment_count: Option<i32>,
     pub status: String,
     pub error: Option<String>,
-    pub created_at: DateTime<Utc>,
+    pub created_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, sqlx::FromRow)]
@@ -59,7 +58,7 @@ pub struct UploadChunk {
     pub chunk_index: i32,
     pub offset_bytes: i64,
     pub size_bytes: i64,
-    pub received_at: DateTime<Utc>,
+    pub received_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, sqlx::FromRow)]
@@ -68,7 +67,7 @@ pub struct VideoEvent {
     pub video_id: String,
     pub event_type: String,
     pub message: Option<String>,
-    pub created_at: DateTime<Utc>,
+    pub created_at: String,
 }
 
 /// Aggregated analytics returned by GET /api/analytics.
@@ -92,7 +91,7 @@ pub struct StatusCounts {
 // ── Videos ────────────────────────────────────────────────────────────────────
 
 pub async fn insert_video(
-    pool: &PgPool,
+    pool: &SqlitePool,
     id: &str,
     filename: &str,
     file_size: Option<i64>,
@@ -117,13 +116,13 @@ pub async fn insert_video(
 }
 
 pub async fn update_video_status(
-    pool: &PgPool,
+    pool: &SqlitePool,
     id: &str,
     status: &str,
     error: Option<&str>,
 ) -> Result<(), String> {
     sqlx::query(
-        "UPDATE videos SET status = $1, error = $2, updated_at = NOW() WHERE id = $3",
+        "UPDATE videos SET status = $1, error = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3",
     )
     .bind(status)
     .bind(error)
@@ -135,13 +134,13 @@ pub async fn update_video_status(
 }
 
 pub async fn update_video_manifest(
-    pool: &PgPool,
+    pool: &SqlitePool,
     id: &str,
     manifest_url: &str,
     storage_key: Option<&str>,
 ) -> Result<(), String> {
     sqlx::query(
-        "UPDATE videos SET manifest_url = $1, storage_key = $2, status = 'ready', updated_at = NOW() WHERE id = $3",
+        "UPDATE videos SET manifest_url = $1, storage_key = $2, status = 'ready', updated_at = CURRENT_TIMESTAMP WHERE id = $3",
     )
     .bind(manifest_url)
     .bind(storage_key)
@@ -152,7 +151,7 @@ pub async fn update_video_manifest(
     Ok(())
 }
 
-pub async fn list_videos(pool: &PgPool) -> Result<Vec<VideoRow>, String> {
+pub async fn list_videos(pool: &SqlitePool) -> Result<Vec<VideoRow>, String> {
     sqlx::query_as::<_, VideoRow>(
         "SELECT * FROM videos ORDER BY created_at DESC",
     )
@@ -161,7 +160,7 @@ pub async fn list_videos(pool: &PgPool) -> Result<Vec<VideoRow>, String> {
     .map_err(|e| format!("list_videos: {e}"))
 }
 
-pub async fn get_video(pool: &PgPool, id: &str) -> Result<Option<VideoRow>, String> {
+pub async fn get_video(pool: &SqlitePool, id: &str) -> Result<Option<VideoRow>, String> {
     sqlx::query_as::<_, VideoRow>("SELECT * FROM videos WHERE id = $1")
         .bind(id)
         .fetch_optional(pool)
@@ -171,7 +170,7 @@ pub async fn get_video(pool: &PgPool, id: &str) -> Result<Option<VideoRow>, Stri
 
 // ── Analytics ─────────────────────────────────────────────────────────────────
 
-pub async fn get_analytics(pool: &PgPool) -> Result<Analytics, String> {
+pub async fn get_analytics(pool: &SqlitePool) -> Result<Analytics, String> {
     let row: (i64, Option<i64>, i64) = sqlx::query_as(
         "SELECT COUNT(*), SUM(file_size), (SELECT COUNT(*) FROM upload_chunks) FROM videos",
     )
@@ -212,7 +211,7 @@ pub async fn get_analytics(pool: &PgPool) -> Result<Analytics, String> {
 
 #[allow(clippy::too_many_arguments)]
 pub async fn upsert_media_info(
-    pool: &PgPool,
+    pool: &SqlitePool,
     video_id: &str,
     duration_secs: Option<f64>,
     width: Option<i32>,
@@ -240,7 +239,7 @@ pub async fn upsert_media_info(
             audio_channels = EXCLUDED.audio_channels,
             bitrate_kbps   = EXCLUDED.bitrate_kbps,
             format         = EXCLUDED.format,
-            probed_at      = NOW()
+            probed_at      = CURRENT_TIMESTAMP
         "#,
     )
     .bind(video_id)
@@ -259,7 +258,7 @@ pub async fn upsert_media_info(
     Ok(())
 }
 
-pub async fn get_media_info(pool: &PgPool, video_id: &str) -> Result<Option<VideoMediaInfo>, String> {
+pub async fn get_media_info(pool: &SqlitePool, video_id: &str) -> Result<Option<VideoMediaInfo>, String> {
     sqlx::query_as::<_, VideoMediaInfo>(
         "SELECT * FROM video_media_info WHERE video_id = $1",
     )
@@ -272,7 +271,7 @@ pub async fn get_media_info(pool: &PgPool, video_id: &str) -> Result<Option<Vide
 // ── Renditions ────────────────────────────────────────────────────────────────
 
 pub async fn insert_rendition(
-    pool: &PgPool,
+    pool: &SqlitePool,
     video_id: &str,
     label: &str,
     width: i32,
@@ -298,7 +297,7 @@ pub async fn insert_rendition(
 }
 
 pub async fn mark_rendition_done(
-    pool: &PgPool,
+    pool: &SqlitePool,
     rendition_id: i64,
     playlist_url: &str,
     segment_count: i32,
@@ -316,7 +315,7 @@ pub async fn mark_rendition_done(
 }
 
 pub async fn mark_rendition_failed(
-    pool: &PgPool,
+    pool: &SqlitePool,
     rendition_id: i64,
     error: &str,
 ) -> Result<(), String> {
@@ -331,7 +330,7 @@ pub async fn mark_rendition_failed(
     Ok(())
 }
 
-pub async fn list_renditions(pool: &PgPool, video_id: &str) -> Result<Vec<VideoRendition>, String> {
+pub async fn list_renditions(pool: &SqlitePool, video_id: &str) -> Result<Vec<VideoRendition>, String> {
     sqlx::query_as::<_, VideoRendition>(
         "SELECT * FROM video_renditions WHERE video_id = $1 ORDER BY height ASC",
     )
@@ -344,7 +343,7 @@ pub async fn list_renditions(pool: &PgPool, video_id: &str) -> Result<Vec<VideoR
 // ── Upload chunks ─────────────────────────────────────────────────────────────
 
 pub async fn record_chunk(
-    pool: &PgPool,
+    pool: &SqlitePool,
     video_id: &str,
     tus_upload_id: &str,
     chunk_index: i32,
@@ -368,7 +367,7 @@ pub async fn record_chunk(
     Ok(())
 }
 
-pub async fn list_chunks(pool: &PgPool, video_id: &str) -> Result<Vec<UploadChunk>, String> {
+pub async fn list_chunks(pool: &SqlitePool, video_id: &str) -> Result<Vec<UploadChunk>, String> {
     sqlx::query_as::<_, UploadChunk>(
         "SELECT * FROM upload_chunks WHERE video_id = $1 ORDER BY chunk_index ASC",
     )
@@ -381,7 +380,7 @@ pub async fn list_chunks(pool: &PgPool, video_id: &str) -> Result<Vec<UploadChun
 // ── Events ────────────────────────────────────────────────────────────────────
 
 pub async fn log_event(
-    pool: &PgPool,
+    pool: &SqlitePool,
     video_id: &str,
     event_type: &str,
     message: Option<&str>,
@@ -398,7 +397,7 @@ pub async fn log_event(
     Ok(())
 }
 
-pub async fn list_events(pool: &PgPool, video_id: &str) -> Result<Vec<VideoEvent>, String> {
+pub async fn list_events(pool: &SqlitePool, video_id: &str) -> Result<Vec<VideoEvent>, String> {
     sqlx::query_as::<_, VideoEvent>(
         "SELECT * FROM video_events WHERE video_id = $1 ORDER BY id ASC",
     )

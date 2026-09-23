@@ -24,8 +24,8 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/", get(routes::root_handler))
         // Health
         .route("/health", get(routes::health_handler))
-        // Upload registration
-        .route("/upload", post(routes::upload_handler))
+        // Direct local upload; TUS registration remains available separately.
+        .route("/upload", post(routes::multipart_upload_handler))
         .route("/api/uploads/complete", post(routes::upload_handler))
         // Video list + detail
         .route("/api/videos", get(routes::list_videos_handler))

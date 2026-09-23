@@ -6,7 +6,6 @@
     <title>CipherStream - Video Engine</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
-    <script src="https://cdn.jsdelivr.net/npm/tus-js-client@3.1.1/dist/tus.min.js"></script>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #121212; color: #fff; margin: 0; padding: 20px; }
         .container { max-width: 800px; margin: 0 auto; }
@@ -56,50 +55,18 @@
 
                         uploadStatus.value = `Starting upload for ${file.name}...`;
 
-                        // Initialize a new tus upload
-                        const upload = new tus.Upload(file, {
-                            // Point this to our background rustus server (port 1081)
-                            endpoint: "http://127.0.0.1:1081/files/",
-                            retryDelays: [0, 3000, 5000, 10000, 20000],
-                            metadata: {
-                                filename: file.name,
-                                filetype: file.type
-                            },
-                            onError: function(error) {
-                                uploadStatus.value = "Upload failed: " + error;
-                            },
-                            onProgress: function(bytesUploaded, bytesTotal) {
-                                const percentage = ((bytesUploaded / bytesTotal) * 100).toFixed(2);
-                                uploadStatus.value = `Uploading... ${percentage}%`;
-                            },
-                            onSuccess: async function() {
-                                uploadStatus.value = "Upload complete! Queueing for transcoding...";
-                                
-                                // The file URL from TUS
-                                const tusUrl = upload.url;
-                                
-                                // In a full implementation, we now POST the tusUrl to our Axum backend
-                                // to register the Job in SQLite and queue it for FFmpeg transcoding.
-                                try {
-                                    const res = await fetch('/upload', { 
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({ tus_url: tusUrl })
-                                    });
-                                    if (!res.ok) {
-                                        throw new Error(await res.text());
-                                    }
-                                    const result = await res.json();
-                                    uploadStatus.value = `Upload ${result.status}. Video ID: ${result.video_id}`;
-                                    videoId.value = result.video_id;
-                                    pollStatus(result.status_url);
-                                } catch(e) {
-                                    uploadStatus.value = "Backend registration failed: " + e;
-                                }
-                            }
-                        });
-
-                        upload.start();
+                        const form = new FormData();
+                        form.append('file', file);
+                        try {
+                            const res = await fetch('/upload', { method: 'POST', body: form });
+                            if (!res.ok) throw new Error(await res.text());
+                            const result = await res.json();
+                            uploadStatus.value = `Upload ${result.status}. Video ID: ${result.video_id}`;
+                            videoId.value = result.video_id;
+                            pollStatus(result.status_url);
+                        } catch (error) {
+                            uploadStatus.value = `Upload failed: ${error}`;
+                        }
                     };
                     fileInput.click();
                 };
@@ -128,8 +95,8 @@
 
                 const playStream = () => {
                     const video = document.getElementById('video-player');
-                    const hlsSrc = `/stream/${videoId.value}/playlist.m3u8`;
-                    const mp4Src = `/stream/${videoId.value}/source.mp4`;
+                    const hlsSrc = `/stream/${videoId.value}/master.m3u8`;
+                    const mp4Src = '';
 
                     if (Hls.isSupported()) {
                         const hls = new Hls();

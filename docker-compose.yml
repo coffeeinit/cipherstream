@@ -3,12 +3,12 @@ services:
     build: .
     ports:
       - "8080:8080"
-      - "1081:1081"
     environment:
       CIPHERSTREAM_CONFIG: /app/config.toml
     volumes:
       - cipherstream-data:/app/data
 
+  # S3/MinIO is intentionally deferred until the local beta is stable.
   minio:
     image: minio/minio:latest
     profiles: ["s3"]

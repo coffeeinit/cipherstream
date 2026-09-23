@@ -100,20 +100,20 @@ impl Transcoder for NativeFFmpegTranscoder {
                     .as_ref()
                     .and_then(|f| f.bit_rate.as_deref())
                     .and_then(|b| b.parse::<i64>().ok())
-                    .map(|b| b / 1000);
+                    .map(|b| (b / 1000) as i32);
                 let format = info
                     .format
                     .as_ref()
                     .and_then(|f| f.format_name.clone());
 
-                let width = video_stream.and_then(|s| s.width);
-                let height = video_stream.and_then(|s| s.height);
+                let width = video_stream.and_then(|s| s.width).map(|value| value as i32);
+                let height = video_stream.and_then(|s| s.height).map(|value| value as i32);
                 let fps = video_stream
                     .and_then(|s| s.r_frame_rate.as_deref())
                     .and_then(parse_fps);
                 let video_codec = video_stream.and_then(|s| s.codec_name.clone());
                 let audio_codec = audio_stream.and_then(|s| s.codec_name.clone());
-                let audio_channels = audio_stream.and_then(|s| s.channels);
+                let audio_channels = audio_stream.and_then(|s| s.channels).map(|value| value as i32);
 
                 upsert_media_info(
                     &self.pool,
@@ -163,9 +163,9 @@ impl Transcoder for NativeFFmpegTranscoder {
                 &self.pool,
                 video_id,
                 &rendition.label,
-                rendition.width as i64,
-                rendition.height as i64,
-                rendition.video_bitrate_kbps as i64,
+                rendition.width as i32,
+                rendition.height as i32,
+                rendition.video_bitrate_kbps as i32,
             )
             .await
             .unwrap_or(0);
@@ -211,7 +211,7 @@ impl Transcoder for NativeFFmpegTranscoder {
                         format!("/stream/{video_id}/{}/index.m3u8", rendition.label);
 
                     if rend_id > 0 {
-                        mark_rendition_done(&self.pool, rend_id, &playlist_url, seg_count)
+                        mark_rendition_done(&self.pool, rend_id, &playlist_url, seg_count as i32)
                             .await
                             .ok();
                     }

@@ -18,13 +18,5 @@ async-trait = "0.1"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 
-# Database — PostgreSQL via sqlx
-sqlx = { version = "0.7", features = ["postgres", "runtime-tokio-native-tls", "macros", "chrono", "uuid"] }
-
-# Redis queue
-fred = { version = "9", default-features = false, features = ["tokio-runtime", "i-streams", "i-keys"] }
-
-# Storage backends
-aws-config = { version = "1" }
-aws-sdk-s3 = { version = "1" }
-aws-credential-types = { version = "1" }
+# Local SQLite database
+sqlx = { version = "0.7", features = ["sqlite", "runtime-tokio-native-tls", "macros", "chrono", "uuid"] }

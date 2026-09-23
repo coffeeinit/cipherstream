@@ -34,10 +34,9 @@ pub struct ServerConfig {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct DatabaseConfig {
-    /// Full PostgreSQL connection URL.
-    /// e.g. postgres://user:pass@localhost:5432/cipherstream
-    #[serde(default = "default_db_url")]
-    pub url: String,
+    /// SQLite database file path.
+    #[serde(default = "default_db_path")]
+    pub path: PathBuf,
     #[serde(default = "default_db_max_connections")]
     pub max_connections: u32,
 }
@@ -190,7 +189,7 @@ impl Default for ServerConfig {
 impl Default for DatabaseConfig {
     fn default() -> Self {
         Self {
-            url: default_db_url(),
+            path: default_db_path(),
             max_connections: default_db_max_connections(),
         }
     }
@@ -258,9 +257,7 @@ fn default_bind_addr() -> SocketAddr {
     "127.0.0.1:8080".parse().expect("default bind addr valid")
 }
 fn default_ui_dist() -> PathBuf { PathBuf::from("ui/dist") }
-fn default_db_url() -> String {
-    "postgres://cipherstream:secret@localhost:5432/cipherstream".to_string()
-}
+fn default_db_path() -> PathBuf { PathBuf::from("data/cipherstream.db") }
 fn default_db_max_connections() -> u32 { 10 }
 fn default_queue_type() -> String { "memory".to_string() }
 fn default_redis_url() -> String { "redis://127.0.0.1:6379".to_string() }
@@ -268,7 +265,7 @@ fn default_stream_key() -> String { "cipherstream:jobs".to_string() }
 fn default_consumer_group() -> String { "workers".to_string() }
 fn default_storage_type() -> String { "local".to_string() }
 fn default_data_dir() -> PathBuf { PathBuf::from("data") }
-fn default_tus_enabled() -> bool { true }
+fn default_tus_enabled() -> bool { false }
 fn default_tus_host() -> String { "0.0.0.0".to_string() }
 fn default_tus_port() -> u16 { 1081 }
 fn default_parallelism() -> usize { 4 }

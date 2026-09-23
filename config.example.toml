@@ -42,8 +42,8 @@ data_dir = "data"
 
 # ─── TUS Upload Server ───────────────────────────────────────────────────────
 [tus]
-# Whether to spawn the embedded rustus TUS server on startup.
-enabled = true
+# Whether to spawn the optional embedded rustus TUS server on startup.
+enabled = false
 
 # Host/port the rustus process listens on (separate from the main HTTP port).
 host    = "0.0.0.0"

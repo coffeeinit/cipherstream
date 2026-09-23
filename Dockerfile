@@ -1,21 +1,21 @@
-FROM rust:1-bookworm AS builder
+FROM rust:1.98-bookworm AS builder
 
 WORKDIR /app
 COPY . .
-RUN cargo build --release -p rustus -p cipherstream-server
+ENV CARGO_TARGET_DIR=/app/target
+RUN cargo build --release -p cipherstream-server
 
 FROM debian:bookworm-slim
 
 WORKDIR /app
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
+    && apt-get install -y --no-install-recommends ca-certificates ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/target/release/cipherstream-server /usr/local/bin/cipherstream-server
-COPY --from=builder /app/target/release/rustus /usr/local/bin/rustus
 COPY config.example.toml /app/config.toml
-RUN sed -i 's#binary_path = "./target/release/rustus"#binary_path = "/usr/local/bin/rustus"#' /app/config.toml
+RUN sed -i 's#bind_addr = "127.0.0.1:8080"#bind_addr = "0.0.0.0:8080"#' /app/config.toml
 
 ENV CIPHERSTREAM_CONFIG=/app/config.toml
-EXPOSE 8080 1081
+EXPOSE 8080
 CMD ["cipherstream-server"]

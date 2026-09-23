@@ -30,8 +30,8 @@ impl JobStatusStore {
         self.set(VideoStatus {
             video_id: video_id.to_string(),
             state: JobState::Queued,
-            playlist_url: format!("/stream/{video_id}/playlist.m3u8"),
-            source_url: format!("/stream/{video_id}/source.mp4"),
+            playlist_url: format!("/stream/{video_id}/master.m3u8"),
+            source_url: String::new(),
             error: None,
         })
         .await;

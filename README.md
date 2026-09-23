@@ -7,31 +7,29 @@ Built to be extended, not rebuilt.**
 
 </div>
 
-CipherStream is a **single, self‑contained video engine** that gives you a complete “YouTube‑in‑a‑box” experience – but it’s designed so you can **add your own features** without fighting the core. Drop in your own storage backend, plug in a custom encoder, add watermarking, or hook up your authentication system – all without touching the core pipeline.
+CipherStream is a **local-first video engine** for uploading a file, transcoding it with FFmpeg, packaging adaptive HLS, and serving it to a browser. The beta keeps the path deliberately small and reliable: SQLite metadata, local filesystem storage, one in-process job queue, and a built-in web UI. S3 storage and resumable uploads are planned follow-up backends.
 
 ---
 
 ## ✨ What makes it special
 
-- **One codebase, one binary** – everything from upload to streaming runs in a single process (or can be split later if you outgrow it).
-- **Pluggable by design** – every major component (storage, queue, encoder, DRM, auth) is an interface you can implement and swap in.
-- **Fast by default** – parallel chunked transcoding, HLS adaptive streaming, and signed‑URL delivery for zero‑copy playback.
-- **Honest security** – short‑lived signed URLs protect your content; real DRM (Widevine/PlayReady) is a configuration away when you need it.
-- **Built‑in Vue UI** – a modern dashboard for uploads, job monitoring, and player – fully customizable.
+- **One codebase, one binary** – upload, queue, transcode, and stream run in one server process.
+- **Local by default** – SQLite metadata and local disk require no database or object-storage service.
+- **FFmpeg HLS** – produces 360p, 720p, and 1080p variants plus a master playlist.
+- **Built-in web UI** – choose a video file, monitor the job, and play the resulting HLS stream.
 
 ---
 
-## 🚀 Core Features (all included)
+## 🚀 Core Features (beta)
 
 | Feature | What it does |
 |---------|--------------|
-| **Resumable uploads** | TUS‑compliant chunked uploads – resume after network failure. |
-| **Parallel transcoding** | Split video at keyframes, encode all bitrates in parallel, stitch – uses your CPU cores efficiently. |
-| **HLS packaging** | Generates adaptive HLS (fMP4/TS) with master & variant playlists. |
-| **Object storage** | S3‑compatible (MinIO, AWS, Garage) – but you can plug in local disk or any other backend. |
-| **Secure streaming** | Signed URLs with short expiry – no one can hotlink or download without permission. |
-| **Job queue** | Built‑in in‑memory queue; swap with Redis for distributed workers. |
-| **Web UI** | Vue 3 + hls.js – upload, watch, manage videos. |
+| **HTTP upload** | Upload a complete local video file with `POST /upload`. |
+| **Transcoding** | FFmpeg creates configured HLS renditions in a background worker. |
+| **HLS packaging** | Generates a master playlist and one variant playlist per rendition. |
+| **Local storage** | Stores uploads, HLS output, and SQLite metadata under `data/`. |
+| **Job status** | Poll `GET /api/videos/:id/status` while a job is queued or processing. |
+| **Web UI** | Select a file, monitor transcoding, and play the HLS master playlist. |
 
 ---
 
@@ -151,34 +149,30 @@ That's it – no other changes needed.
 git clone https://github.com/sudo-su-coffee/cipherstream.git
 cd cipherstream
 
-# 2. Build from source (compiles native rust-ffmpeg bindings)
-cargo build --release
+# 2. Install FFmpeg and build the server
+# Ubuntu: sudo apt-get install ffmpeg
+cargo build --release -p cipherstream-server
 
-# 3. Run with default config (local storage, embedded SQLite, native FFmpeg)
-./target/release/cipherstream
+# 3. Run with local storage and SQLite
+./target/release/cipherstream-server
 
-# 3. Open http://localhost:8080 and start uploading
+# 4. Open http://localhost:8080 and select a video
 ```
 
-**Everything works out of the box** – but you can customize everything via `config.toml`:
+The beta uses local storage by default. Edit `config.toml` only when you need to change the bind address,
+data directory, rendition ladder, or FFmpeg path:
 
 ```toml
+[database]
+path = "data/cipherstream.db"
+
 [storage]
-type = "s3"   # or "local"
-endpoint = "http://minio:9000"
-bucket = "videos"
-
-[queue]
-type = "redis"   # or "memory"
-addr = "localhost:6379"
-
-[auth]
-type = "jwt"
-secret = "your-secret"
+type = "local"
+data_dir = "data"
 
 [transcoder]
 ffmpeg_path = "/usr/bin/ffmpeg"
-parallelism = 4   # number of segments to encode concurrently
+parallelism = 4
 ```
 
 ### Current runnable configuration
@@ -188,7 +182,7 @@ CipherStream uses TOML configuration. It loads `config.toml` by default, or the 
 
 ```bash
 cp config.example.toml config.toml
-cargo build --release -p rustus -p cipherstream-server
+CIPHERSTREAM_CONFIG=config.toml cargo build --release -p cipherstream-server
 CIPHERSTREAM_CONFIG=config.toml ./target/release/cipherstream-server
 ```
 
@@ -202,19 +196,18 @@ The Docker image bakes a container-safe `/app/config.toml`; for host runs, copy 
 `config.example.toml`.
 
 The local storage backend is wired first and stores uploads/HLS output under `data/`.
-The `s3` storage mode is represented in config and compose via MinIO, and is the next backend
-implementation target.
+S3 storage, TUS resumable upload, authentication, and DRM are intentionally deferred until the
+local upload-to-HLS path is stable.
 
 ---
 
 ## 📦 What's included (the complete package)
 
-- **Backend** – Rust (blazing fast, memory-safe, single binary, zero runtime dependencies).
-- **Frontend** – Vue.js UI (built into the binary as embedded static files via `include_bytes!`).
-- **FFmpeg** – Bundled directly in the repository. Compiled statically via `rust-ffmpeg` (no external downloads or installations required!).
-- **Storage** – Works with local disk out of the box; connect to S3 in 1 line.
-- **Queue** – In‑memory for development; swap to Redis for production.
-- **Database** – Embedded SQLite out of the box (zero-config, high performance); swap to PostgreSQL for clustered environments.
+- **Backend** – Rust, with one HTTP server and one in-process background worker.
+- **Frontend** – A small embedded browser UI with Vue and hls.js loaded from CDNs.
+- **FFmpeg** – Uses `ffmpeg` and `ffprobe` installed on the host or in the Docker image.
+- **Storage** – Local filesystem under `data/`.
+- **Database** – SQLite under `data/cipherstream.db`.
 
 ---
 
