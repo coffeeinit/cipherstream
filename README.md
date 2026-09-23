@@ -147,9 +147,9 @@ That's it – no other changes needed.
 ## 🧪 Quick Start (single binary)
 
 ```bash
-# 1. Clone the repository (FFmpeg is bundled inside!)
-git clone https://github.com/yourusername/CipherStream.git
-cd CipherStream
+# 1. Clone the repository
+git clone https://github.com/sudo-su-coffee/cipherstream.git
+cd cipherstream
 
 # 2. Build from source (compiles native rust-ffmpeg bindings)
 cargo build --release
