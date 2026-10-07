@@ -1,0 +1,65 @@
+{{if .Video}}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  {{if or (eq .Video.Status "queued") (eq .Video.Status "processing")}}<meta http-equiv="refresh" content="3">{{end}}
+  <title>{{.Video.Name}} · CipherStream</title><link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar shell"><a class="brand" href="/"><span class="brand-mark">CS</span><span class="brand-name">cipher<span>stream</span></span></a><span class="local-tag"><i></i> local video studio</span></header>
+  <main class="shell watch-shell">
+    <a class="back-link" href="/">← BACK TO YOUR VIDEOS</a>
+    <div class="watch-heading"><div><div class="eyebrow">SHAREABLE HLS STREAM</div><h1>{{.Video.Name}}</h1><p>{{if eq .Video.Status "ready"}}Ready to watch · {{duration .Video.DurationSeconds}}{{if .Video.Remuxed}} · packaged without re-encoding{{end}}{{else}}{{.Video.Phase}}{{end}}</p></div><span class="status-pill {{.Video.Status}}">{{statusLabel .Video.Status}}</span></div>
+    <div class="player-frame">
+      {{if eq .Video.Status "ready"}}
+        <video controls playsinline preload="metadata" poster="/stream/{{.Video.ID}}/thumbnail.jpg" src="{{.StreamURL}}">Your browser does not support the video element.</video>
+      {{else if eq .Video.Status "failed"}}
+        <div class="player-message error-message"><strong>Conversion failed</strong><span>{{.Video.Error}}</span></div>
+      {{else}}
+        <div class="player-message"><div class="spinner"></div><strong>{{.Video.Phase}}</strong><span>{{.Video.Progress}}% · this page refreshes automatically</span><div class="progress-track"><span style="width:{{.Video.Progress}}%"></span></div></div>
+      {{end}}
+    </div>
+    {{if eq .Video.Status "ready"}}
+    <div class="share-box"><div><div class="label">HLS playlist</div><a class="playlist-link" href="{{.StreamURL}}">{{.StreamURL}}</a></div><span class="share-hint">Copy this page address to share the video.</span></div>
+    <div class="browser-note">HLS playback depends on native browser support (for example, Safari). The playlist link also works in HLS-compatible players.</div>
+    {{end}}
+    <div class="watch-footer"><span>{{bytes .Video.SizeBytes}} · uploaded {{time .Video.CreatedAt}}</span><a href="/">Open CipherStream</a></div>
+  </main>
+  <footer class="footer shell"><span>CIPHERSTREAM · GO + FFMPEG</span><span>ONE VIDEO · ONE SHARE LINK</span></footer>
+</body></html>
+{{else if .Missing}}
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Video not found · CipherStream</title><link rel="stylesheet" href="/style.css"></head><body><header class="topbar shell"><a class="brand" href="/"><span class="brand-mark">CS</span><span class="brand-name">cipher<span>stream</span></span></a></header><main class="shell missing"><div class="eyebrow">404 · NOT FOUND</div><h1>This video link is unavailable.</h1><p>It may be incorrect or the video may have been removed from the server.</p><a class="button" href="/">Back to CipherStream</a></main></body></html>
+{{else}}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  {{if .Pending}}<meta http-equiv="refresh" content="4">{{end}}
+  <meta name="theme-color" content="#101612"><title>CipherStream · Video, ready to stream</title><link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar shell"><a class="brand" href="/"><span class="brand-mark">CS</span><span class="brand-name">cipher<span>stream</span></span></a><span class="local-tag"><i></i> local video studio</span></header>
+  <main class="shell">
+    <section class="intro"><div><div class="eyebrow">UPLOAD · CONVERT · SHARE</div><h1>Your video,<br><em>ready to stream.</em></h1><p>Upload a video. CipherStream converts it to browser-ready HLS, stores it on this server, and gives you a link to share.</p></div><div class="intro-note"><strong>One simple flow.</strong><span>GO · FFMPEG · HLS</span></div></section>
+    {{if .Notice}}<div class="notice success">{{.Notice}}</div>{{end}}{{if .Error}}<div class="notice failure">{{.Error}}</div>{{end}}
+    <section class="upload-grid">
+      <form class="card upload-card" action="/upload" method="post" enctype="multipart/form-data">
+        <div class="card-head"><h2>Start with a video</h2><span class="step">01 / UPLOAD</span></div>
+        <label class="file-pick" for="file"><span class="upload-icon" aria-hidden="true">↑</span><strong>Choose one or more video files</strong><span class="pick-copy">Any format your server's FFmpeg build can read.</span><span class="button secondary">Browse videos</span><small>Maximum {{.MaxUploadLabel}} per file · Files stay on this server</small></label>
+        <input class="file-input" id="file" name="file" type="file" accept="video/*,.mkv,.avi,.mov,.wmv,.flv,.m4v,.webm" multiple required>
+	        <div class="quality-control"><label for="crf">H.264 quality <span>CRF 18–32</span></label><div class="quality-explainer">Choose the quality level for videos that need re-encoding.</div><input id="crf" name="crf" type="number" value="23" min="18" max="32" aria-label="CRF value from 18 to 32"><small>18 = higher quality · 32 = smaller file · Already H.264 + AAC? It is packaged without re-encoding.</small></div>
+        <button class="button primary" type="submit">Upload &amp; convert <span>→</span></button>
+        <p class="form-note">Conversion runs in the background. This page refreshes while jobs are processing.</p>
+      </form>
+      <aside class="card settings-card"><div class="card-head"><div><h2>One job, end to end</h2><p>No accounts, cloud storage, or setup screen.</p></div><span class="step">02 / STREAM</span></div><div class="steps"><div><span>01</span><p><strong>Upload</strong><br>Choose multiple videos in one go.</p></div><div><span>02</span><p><strong>Convert</strong><br>H.264 + AAC HLS, with a thumbnail.</p></div><div><span>03</span><p><strong>Share</strong><br>Open the watch page and copy its URL.</p></div></div><div class="local-callout"><i></i><span>Stored locally under <code>data/</code></span></div></aside>
+    </section>
+    <section class="library"><div class="section-head"><div><div class="eyebrow">YOUR COLLECTION</div><h2>Videos</h2></div><span class="count">{{len .Videos}} VIDEO{{if ne (len .Videos) 1}}S{{end}}</span></div>
+      {{if .Videos}}<div class="video-list">{{range .Videos}}
+        <article class="video-card"><div class="thumb">{{if eq .Status "ready"}}<img src="/stream/{{.ID}}/thumbnail.jpg" alt="Thumbnail for {{.Name}}">{{else}}<span class="thumb-placeholder">CIPHERSTREAM</span>{{end}}<span class="status-pill {{.Status}}">{{statusLabel .Status}}</span></div><div class="video-info"><h3 title="{{.Name}}">{{.Name}}</h3><p>{{bytes .SizeBytes}}{{if gt .DurationSeconds 0.0}} · {{duration .DurationSeconds}}{{end}}{{if .Remuxed}} · REMUXED{{end}}</p>{{if or (eq .Status "queued") (eq .Status "processing")}}<div class="phase">{{.Phase}} · {{.Progress}}%</div><div class="progress-track"><span style="width:{{.Progress}}%"></span></div>{{end}}{{if eq .Status "failed"}}<p class="error-text">{{.Error}}</p>{{end}}<div class="video-actions">{{if eq .Status "ready"}}<a class="button primary small" href="/watch/{{.ID}}">Watch video <span>↗</span></a><a class="button secondary small" href="/stream/{{.ID}}/index.m3u8">HLS playlist</a>{{else if eq .Status "failed"}}<span class="phase">Check FFmpeg logs on the server.</span>{{else}}<a class="button secondary small" href="/watch/{{.ID}}">View progress</a>{{end}}</div></div></article>
+      {{end}}</div>{{else}}<div class="empty-state"><span>HLS LIBRARY</span><p>Your videos will show up here after you upload them.</p></div>{{end}}
+    </section>
+  </main>
+  <footer class="footer shell"><span>CIPHERSTREAM · A SMALL GO STREAMING DEMO</span><span>FILES STAY ON THE SERVER YOU RUN</span></footer>
+</body></html>
+{{end}}

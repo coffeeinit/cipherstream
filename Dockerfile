@@ -1,21 +1,21 @@
-FROM rust:1.98-bookworm AS builder
-
-WORKDIR /app
-COPY . .
-ENV CARGO_TARGET_DIR=/app/target
-RUN cargo build --release -p cipherstream-server
+FROM golang:1.22-bookworm AS build
+WORKDIR /src
+COPY go.mod ./
+COPY main.go ./
+COPY web ./web
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/cipherstream .
 
 FROM debian:bookworm-slim
-
-WORKDIR /app
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY --from=builder /app/target/release/cipherstream-server /usr/local/bin/cipherstream-server
-COPY config.example.toml /app/config.toml
-RUN sed -i 's#bind_addr = "127.0.0.1:8080"#bind_addr = "0.0.0.0:8080"#' /app/config.toml
-
-ENV CIPHERSTREAM_CONFIG=/app/config.toml
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --system --uid 10001 --home-dir /app cipherstream \
+    && mkdir -p /data \
+    && chown -R cipherstream:cipherstream /data
+WORKDIR /app
+COPY --from=build /out/cipherstream /usr/local/bin/cipherstream
+ENV PORT=8080 DATA_DIR=/data
 EXPOSE 8080
-CMD ["cipherstream-server"]
+VOLUME ["/data"]
+USER cipherstream
+ENTRYPOINT ["cipherstream"]
