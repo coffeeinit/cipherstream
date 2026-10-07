@@ -1,9 +1,10 @@
 FROM golang:1.22-bookworm AS build
 WORKDIR /src
 COPY go.mod ./
-COPY main.go ./
+COPY cipherstream.go ./
 COPY web ./web
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/cipherstream .
+COPY cmd ./cmd
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/cipherstream ./cmd/cipherstream
 
 FROM debian:bookworm-slim
 RUN apt-get update \

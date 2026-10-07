@@ -13,7 +13,17 @@
     <div class="watch-heading"><div><div class="eyebrow">SHAREABLE HLS STREAM</div><h1>{{.Video.Name}}</h1><p>{{if eq .Video.Status "ready"}}Ready to watch · {{duration .Video.DurationSeconds}}{{if .Video.Remuxed}} · packaged without re-encoding{{end}}{{else}}{{.Video.Phase}}{{end}}</p></div><span class="status-pill {{.Video.Status}}">{{statusLabel .Video.Status}}</span></div>
     <div class="player-frame">
       {{if eq .Video.Status "ready"}}
-        <video controls playsinline preload="metadata" poster="/stream/{{.Video.ID}}/thumbnail.jpg" src="{{.StreamURL}}">Your browser does not support the video element.</video>
+        <div class="hls-player-shell">
+          <video id="hls-player" class="hls-video" playsinline preload="metadata" poster="/hls/{{.Video.ID}}/thumbnail.jpg" data-hls-src="{{.StreamURL}}"></video>
+          <div class="hls-controls" aria-label="HLS player controls">
+            <button id="play-toggle" type="button" aria-label="Play video">Play</button>
+            <span id="play-time">0:00 / --:--</span>
+            <input id="seek-bar" type="range" min="0" max="1000" value="0" aria-label="Seek video" disabled>
+            <label class="volume-label" for="volume-control">VOL</label><input id="volume-control" type="range" min="0" max="1" step="0.05" value="1" aria-label="Volume">
+            <button id="fullscreen-toggle" type="button" aria-label="Enter fullscreen">Full screen</button>
+          </div>
+          <div id="hls-error" class="player-message error-message" role="alert" hidden><strong>HLS playback unavailable</strong><span id="hls-error-text"></span></div>
+        </div>
       {{else if eq .Video.Status "failed"}}
         <div class="player-message error-message"><strong>Conversion failed</strong><span>{{.Video.Error}}</span></div>
       {{else}}
@@ -21,12 +31,64 @@
       {{end}}
     </div>
     {{if eq .Video.Status "ready"}}
-    <div class="share-box"><div><div class="label">HLS playlist</div><a class="playlist-link" href="{{.StreamURL}}">{{.StreamURL}}</a></div><span class="share-hint">Copy this page address to share the video.</span></div>
-    <div class="browser-note">HLS playback depends on native browser support (for example, Safari). The playlist link also works in HLS-compatible players.</div>
+    <div class="share-box"><div><div class="label">HLS playlist</div><a class="playlist-link" href="{{.StreamURL}}">{{.StreamURL}}</a></div><span class="share-hint">HLS.js player · playback loads the HLS playlist, not the source upload.</span></div>
+    <div class="browser-note">This HLS.js player requires browser MediaSource support. The playlist also works in HLS-compatible players.</div>
     {{end}}
     <div class="watch-footer"><span>{{bytes .Video.SizeBytes}} · uploaded {{time .Video.CreatedAt}}</span><a href="/">Open CipherStream</a></div>
   </main>
-  <footer class="footer shell"><span>CIPHERSTREAM · GO + FFMPEG</span><span>ONE VIDEO · ONE SHARE LINK</span></footer>
+  {{if and .Video (eq .Video.Status "ready")}}
+  <script src="/hls.js"></script>
+  <script>
+  (() => {
+    const video = document.getElementById('hls-player');
+    const play = document.getElementById('play-toggle');
+    const time = document.getElementById('play-time');
+    const seek = document.getElementById('seek-bar');
+    const volume = document.getElementById('volume-control');
+    const fullscreen = document.getElementById('fullscreen-toggle');
+    const errorBox = document.getElementById('hls-error');
+    const errorText = document.getElementById('hls-error-text');
+    const showError = (message) => { errorText.textContent = message; errorBox.hidden = false; };
+    if (!window.Hls || !Hls.isSupported()) {
+      showError('This browser does not support the HLS.js MediaSource playback path.');
+      return;
+    }
+    const hls = new Hls({ enableWorker: true });
+    hls.loadSource(video.dataset.hlsSrc);
+    hls.attachMedia(video);
+    hls.on(Hls.Events.ERROR, (_event, data) => {
+      if (data.fatal) showError('The HLS stream could not be loaded. Check browser support and the server logs.');
+    });
+    const formatTime = (seconds) => {
+      if (!Number.isFinite(seconds)) return '--:--';
+      const n = Math.max(0, Math.floor(seconds));
+      return Math.floor(n / 60) + ':' + String(n % 60).padStart(2, '0');
+    };
+    const sync = () => {
+      const duration = video.duration || 0;
+      time.textContent = formatTime(video.currentTime) + ' / ' + formatTime(duration);
+      if (duration > 0 && !seek.matches(':active')) seek.value = Math.round(video.currentTime / duration * 1000);
+      seek.disabled = !(duration > 0);
+      play.textContent = video.paused ? 'Play' : 'Pause';
+      play.setAttribute('aria-label', video.paused ? 'Play video' : 'Pause video');
+    };
+    play.addEventListener('click', () => video.paused ? video.play() : video.pause());
+    video.addEventListener('timeupdate', sync);
+    video.addEventListener('loadedmetadata', sync);
+    video.addEventListener('play', sync);
+    video.addEventListener('pause', sync);
+    seek.addEventListener('input', () => { if (video.duration) video.currentTime = Number(seek.value) / 1000 * video.duration; });
+    volume.addEventListener('input', () => { video.volume = Number(volume.value); });
+    fullscreen.addEventListener('click', () => {
+      const target = document.querySelector('.hls-player-shell');
+      if (document.fullscreenElement) document.exitFullscreen();
+      else target.requestFullscreen?.();
+    });
+    sync();
+  })();
+  </script>
+  {{end}}
+  <footer class="footer shell"><span>CIPHERSTREAM · GO PACKAGE + HLS.JS</span><span>ONE VIDEO · ONE SHARE LINK</span></footer>
 </body></html>
 {{else if .Missing}}
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Video not found · CipherStream</title><link rel="stylesheet" href="/style.css"></head><body><header class="topbar shell"><a class="brand" href="/"><span class="brand-mark">CS</span><span class="brand-name">cipher<span>stream</span></span></a></header><main class="shell missing"><div class="eyebrow">404 · NOT FOUND</div><h1>This video link is unavailable.</h1><p>It may be incorrect or the video may have been removed from the server.</p><a class="button" href="/">Back to CipherStream</a></main></body></html>
@@ -41,25 +103,25 @@
 <body>
   <header class="topbar shell"><a class="brand" href="/"><span class="brand-mark">CS</span><span class="brand-name">cipher<span>stream</span></span></a><span class="local-tag"><i></i> local video studio</span></header>
   <main class="shell">
-    <section class="intro"><div><div class="eyebrow">UPLOAD · CONVERT · SHARE</div><h1>Your video,<br><em>ready to stream.</em></h1><p>Upload a video. CipherStream converts it to browser-ready HLS, stores it on this server, and gives you a link to share.</p></div><div class="intro-note"><strong>One simple flow.</strong><span>GO · FFMPEG · HLS</span></div></section>
+    <section class="intro"><div><div class="eyebrow">UPLOAD · CONVERT · SHARE</div><h1>Your video,<br><em>ready to stream.</em></h1><p>Upload videos, convert them to HLS, store them locally, and share a watch link powered by the HLS.js player.</p></div><div class="intro-note"><strong>One simple flow.</strong><span>GO · FFMPEG · HLS</span></div></section>
     {{if .Notice}}<div class="notice success">{{.Notice}}</div>{{end}}{{if .Error}}<div class="notice failure">{{.Error}}</div>{{end}}
     <section class="upload-grid">
       <form class="card upload-card" action="/upload" method="post" enctype="multipart/form-data">
         <div class="card-head"><h2>Start with a video</h2><span class="step">01 / UPLOAD</span></div>
         <label class="file-pick" for="file"><span class="upload-icon" aria-hidden="true">↑</span><strong>Choose one or more video files</strong><span class="pick-copy">Any format your server's FFmpeg build can read.</span><span class="button secondary">Browse videos</span><small>Maximum {{.MaxUploadLabel}} per file · Files stay on this server</small></label>
         <input class="file-input" id="file" name="file" type="file" accept="video/*,.mkv,.avi,.mov,.wmv,.flv,.m4v,.webm" multiple required>
-	        <div class="quality-control"><label for="crf">H.264 quality <span>CRF 18–32</span></label><div class="quality-explainer">Choose the quality level for videos that need re-encoding.</div><input id="crf" name="crf" type="number" value="23" min="18" max="32" aria-label="CRF value from 18 to 32"><small>18 = higher quality · 32 = smaller file · Already H.264 + AAC? It is packaged without re-encoding.</small></div>
+        <div class="quality-control"><label for="crf">H.264 quality <span>CRF 18–32</span></label><div class="quality-explainer">Choose the quality level for videos that need re-encoding.</div><input id="crf" name="crf" type="number" value="23" min="18" max="32" aria-label="CRF value from 18 to 32"><small>18 = higher quality · 32 = smaller file · Already H.264 + AAC? It is packaged without re-encoding.</small></div>
         <button class="button primary" type="submit">Upload &amp; convert <span>→</span></button>
         <p class="form-note">Conversion runs in the background. This page refreshes while jobs are processing.</p>
       </form>
-      <aside class="card settings-card"><div class="card-head"><div><h2>One job, end to end</h2><p>No accounts, cloud storage, or setup screen.</p></div><span class="step">02 / STREAM</span></div><div class="steps"><div><span>01</span><p><strong>Upload</strong><br>Choose multiple videos in one go.</p></div><div><span>02</span><p><strong>Convert</strong><br>H.264 + AAC HLS, with a thumbnail.</p></div><div><span>03</span><p><strong>Share</strong><br>Open the watch page and copy its URL.</p></div></div><div class="local-callout"><i></i><span>Stored locally under <code>data/</code></span></div></aside>
+      <aside class="card settings-card"><div class="card-head"><div><h2>One job, end to end</h2><p>No accounts, cloud storage, or setup screen.</p></div><span class="step">02 / STREAM</span></div><div class="steps"><div><span>01</span><p><strong>Upload</strong><br>Choose multiple videos in one go.</p></div><div><span>02</span><p><strong>Convert</strong><br>H.264 + AAC HLS, with a thumbnail.</p></div><div><span>03</span><p><strong>Share</strong><br>Share the HLS.js watch page or playlist.</p></div></div><div class="local-callout"><i></i><span>Stored locally under <code>data/</code></span></div></aside>
     </section>
     <section class="library"><div class="section-head"><div><div class="eyebrow">YOUR COLLECTION</div><h2>Videos</h2></div><span class="count">{{len .Videos}} VIDEO{{if ne (len .Videos) 1}}S{{end}}</span></div>
       {{if .Videos}}<div class="video-list">{{range .Videos}}
-        <article class="video-card"><div class="thumb">{{if eq .Status "ready"}}<img src="/stream/{{.ID}}/thumbnail.jpg" alt="Thumbnail for {{.Name}}">{{else}}<span class="thumb-placeholder">CIPHERSTREAM</span>{{end}}<span class="status-pill {{.Status}}">{{statusLabel .Status}}</span></div><div class="video-info"><h3 title="{{.Name}}">{{.Name}}</h3><p>{{bytes .SizeBytes}}{{if gt .DurationSeconds 0.0}} · {{duration .DurationSeconds}}{{end}}{{if .Remuxed}} · REMUXED{{end}}</p>{{if or (eq .Status "queued") (eq .Status "processing")}}<div class="phase">{{.Phase}} · {{.Progress}}%</div><div class="progress-track"><span style="width:{{.Progress}}%"></span></div>{{end}}{{if eq .Status "failed"}}<p class="error-text">{{.Error}}</p>{{end}}<div class="video-actions">{{if eq .Status "ready"}}<a class="button primary small" href="/watch/{{.ID}}">Watch video <span>↗</span></a><a class="button secondary small" href="/stream/{{.ID}}/index.m3u8">HLS playlist</a>{{else if eq .Status "failed"}}<span class="phase">Check FFmpeg logs on the server.</span>{{else}}<a class="button secondary small" href="/watch/{{.ID}}">View progress</a>{{end}}</div></div></article>
+        <article class="video-card"><div class="thumb">{{if eq .Status "ready"}}<img src="/hls/{{.ID}}/thumbnail.jpg" alt="Thumbnail for {{.Name}}">{{else}}<span class="thumb-placeholder">CIPHERSTREAM</span>{{end}}<span class="status-pill {{.Status}}">{{statusLabel .Status}}</span></div><div class="video-info"><h3 title="{{.Name}}">{{.Name}}</h3><p>{{bytes .SizeBytes}}{{if gt .DurationSeconds 0.0}} · {{duration .DurationSeconds}}{{end}}{{if .Remuxed}} · REMUXED{{end}}</p>{{if or (eq .Status "queued") (eq .Status "processing")}}<div class="phase">{{.Phase}} · {{.Progress}}%</div><div class="progress-track"><span style="width:{{.Progress}}%"></span></div>{{end}}{{if eq .Status "failed"}}<p class="error-text">{{.Error}}</p>{{end}}<div class="video-actions">{{if eq .Status "ready"}}<a class="button primary small" href="/watch/{{.ID}}">Watch with HLS.js <span>↗</span></a><a class="button secondary small" href="/hls/{{.ID}}/index.m3u8">HLS playlist</a>{{else if eq .Status "failed"}}<span class="phase">Check FFmpeg logs on the server.</span>{{else}}<a class="button secondary small" href="/watch/{{.ID}}">View progress</a>{{end}}</div></div></article>
       {{end}}</div>{{else}}<div class="empty-state"><span>HLS LIBRARY</span><p>Your videos will show up here after you upload them.</p></div>{{end}}
     </section>
   </main>
-  <footer class="footer shell"><span>CIPHERSTREAM · A SMALL GO STREAMING DEMO</span><span>FILES STAY ON THE SERVER YOU RUN</span></footer>
+  <footer class="footer shell"><span>CIPHERSTREAM · REUSABLE GO HLS SERVICE</span><span>FILES STAY ON THE SERVER YOU RUN</span></footer>
 </body></html>
 {{end}}

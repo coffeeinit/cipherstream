@@ -1,59 +1,106 @@
 # CipherStream
 
-**A small Go app to upload, convert, stream, and share video.**
+**An importable Go package for upload → HLS conversion → streaming.**
 
-CipherStream is a single-process streaming demo: upload one or more videos in a browser, convert them to HLS, store the originals and output locally, and share a watch-page URL. Go owns the HTTP server, pages, upload handling, job queue, metadata, and stream delivery. FFmpeg runs privately on the server as the media engine; users do not configure or interact with it.
+CipherStream is a small Go video service that accepts a video reader, stores the original, converts it to HLS with server-side FFmpeg, tracks conversion status, and serves the playlist and segments. The package has no third-party Go dependencies. FFmpeg and ffprobe must be installed on the server.
 
-## What it does
+## Use as a Go package
 
-- Server-rendered upload and watch pages; no frontend framework or JavaScript app.
-- Multi-file uploads, with two conversions running at once.
-- HLS output using H.264 video and AAC audio; FFmpeg decides which input formats it can read.
-- Automatic stream-copy packaging when the input already has H.264 video and AAC audio.
-- A thumbnail captured around 25% into each video.
-- Conversion status and percentage shown on pages that refresh while work is running.
-- A shareable `/watch/<id>` page and a direct HLS playlist URL.
-- Local storage under `data/` (uploads, HLS segments, thumbnails, and small JSON metadata files).
+```bash
+go get github.com/coffeeinit/cipherstream
+```
 
-## Run with Docker (recommended)
+```go
+package main
 
-Docker builds the Go app and includes FFmpeg in the server image:
+import (
+	"context"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+
+	"github.com/coffeeinit/cipherstream"
+)
+
+func main() {
+	service, err := cipherstream.New(cipherstream.Config{
+		DataDir: "./video-data",
+		Workers: 2,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer service.Close()
+
+	file, err := os.Open("input.mov")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer file.Close()
+
+	video, err := service.Upload(context.Background(), "input.mov", file, 23)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("video ID:", video.ID)
+	fmt.Println("HLS playlist:", cipherstream.PlaylistURL(video.ID))
+
+	mux := http.NewServeMux()
+	mux.Handle("GET /hls/", http.StripPrefix("/hls/", service.HLSHandler()))
+	log.Fatal(http.ListenAndServe(":8080", mux))
+}
+```
+
+`Upload` returns queued metadata. Poll with `video, found := service.GetVideo(id)` until `found && video.Status == "ready"`, then use `PlaylistURL(id)` or mount `HLSHandler()` under the route your app needs. `service.Handler()` provides the complete demo UI, JSON API, watch pages, and HLS routes. Call `Close()` during shutdown to stop workers.
+
+### Public package API
+
+- `New(Config) (*Server, error)` — create storage and background conversion workers.
+- `(*Server).Upload(ctx, filename, reader, crf)` — store and queue an upload; CRF 0 selects the default 23, otherwise use 18–32.
+- `(*Server).GetVideo(id)` / `(*Server).Videos()` — read conversion status and metadata.
+- `(*Server).HLSHandler()` — mount HLS playlists, segments, and thumbnails on your own Go router.
+- `(*Server).Handler()` — run the included demo interface and HTTP API.
+- `PlaylistURL(id)` / `WatchURL(id)` — get same-origin demo paths.
+
+### Optional HTTP API
+
+The included handler exposes `POST /api/videos?crf=23` with a multipart `file` field, `GET /api/videos`, and `GET /api/videos/{id}` for status polling. Responses include the HLS playlist and watch-page paths. The browser demo accepts multiple files at `/upload`.
+
+## HLS playback
+
+The demo watch page uses the locally bundled [hls.js](https://github.com/video-dev/hls.js/) HLS client with custom controls. It loads the generated `.m3u8` playlist only; it does not play the uploaded source file or fall back to a browser-native HLS player. HLS.js uses browser MediaSource/video rendering support, so playback is unavailable in browsers without that support. The generated playlist can also be used by any HLS-compatible player.
+
+## Run the demo app
+
+Requirements: Go 1.22+ and FFmpeg with `ffmpeg` and `ffprobe` available on the server's `PATH`.
+
+```bash
+go run ./cmd/cipherstream
+```
+
+Open <http://localhost:8080>. The upload form accepts multiple videos, shows queued/processing status, and offers CRF 18–32. Compatible H.264/AAC inputs are packaged without re-encoding. Other readable inputs are converted to H.264/AAC HLS. Accepted input formats depend on the server's FFmpeg build.
+
+Or use Docker Compose, which installs FFmpeg in the server image and persists output:
 
 ```bash
 docker compose up --build
 ```
 
-Open <http://localhost:8080>. To change the per-file upload ceiling, set `MAX_UPLOAD_BYTES` in your environment before starting Compose. The default is 4 GiB.
+Open <http://localhost:8080>. The default per-file upload limit is 4 GiB; set `MAX_UPLOAD_BYTES` to change it.
 
-## Run directly
+## Configuration
 
-Requirements: Go 1.22+ and FFmpeg with `ffmpeg` and `ffprobe` available on the server's `PATH`.
+`cipherstream.Config` accepts `DataDir`, `FFmpegPath`, `FFprobePath`, `VideoEncoder`, `MaxUploadBytes`, and `Workers`. The demo command also reads these environment variables:
 
-```bash
-go run .
-```
-
-Then open <http://localhost:8080>. The Go process invokes FFmpeg on the server; it is not a separate UI or service. FFmpeg support varies by build, so accepted media formats and hardware encoders depend on the FFmpeg build installed on the host.
-
-## Settings
-
-| Environment variable | Default | Purpose |
+| Variable | Default | Purpose |
 |---|---:|---|
-| `PORT` | `8080` | HTTP port to listen on (use `:8080` or `0.0.0.0:8080` for an explicit address). |
-| `DATA_DIR` | `data` | Root folder for originals, HLS output, and metadata. |
-| `MAX_UPLOAD_BYTES` | `4294967296` | Maximum request size and per-file size in bytes; multipart batches share the request ceiling. |
-| `FFMPEG_BIN` | `ffmpeg` | FFmpeg executable path. `ffprobe` is resolved beside it when a path is provided. |
-| `FFMPEG_VIDEO_ENCODER` | `libx264` | FFmpeg video encoder used for conversion; set to an installed hardware encoder such as `h264_nvenc` only when that encoder is supported by the host. |
-
-The upload form offers CRF 18–32 (default 23). Already-compatible H.264/AAC inputs are packaged without re-encoding, so CRF does not affect those files.
-
-## Links and playback
-
-- Home/library: `/`
-- Share page: `/watch/<video-id>`
-- Direct playlist: `/stream/<video-id>/index.m3u8`
-
-The watch page uses the browser's native HLS support. Native HLS playback is available in browsers such as Safari; other browsers may need an HLS-compatible player. The playlist URL can also be opened in an HLS-capable player.
+| `PORT` | `8080` | HTTP listen port/address. |
+| `DATA_DIR` | `data` | Root for original uploads, HLS output, and metadata. |
+| `MAX_UPLOAD_BYTES` | `4294967296` | Per-file upload limit; multipart batches share the same request ceiling. |
+| `FFMPEG_BIN` | `ffmpeg` | Server-side FFmpeg executable. |
+| `FFPROBE_BIN` | sibling `ffprobe` or PATH | Server-side ffprobe executable. |
+| `FFMPEG_VIDEO_ENCODER` | `libx264` | Encoder for inputs that need transcoding; the selected encoder must be present in FFmpeg. |
 
 ## Storage layout
 
@@ -66,12 +113,8 @@ data/
   videos/<id>/thumbnail.jpg
 ```
 
-Docker Compose preserves this directory in the `cipherstream-data` volume.
-
-## Demo note
-
-This is intentionally a small demo and has **no authentication**. Anyone who can reach the server can upload videos and view its library. Keep it on a trusted network unless you add access control, rate limits, and a storage-retention policy. Public sharing links are unlisted IDs, not access-controlled links.
+This is a demo package, not a hosted SaaS: it has no authentication, retention policy, or access-control layer. Add those in the application that embeds it before exposing uploads or share links publicly.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+CipherStream is MIT licensed; see [LICENSE](LICENSE). The bundled HLS.js asset is Apache-2.0 licensed; see [web/HLSJS-LICENSE](web/HLSJS-LICENSE).
