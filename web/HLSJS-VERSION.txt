@@ -1,0 +1,3 @@
+hls.js 1.7.3
+Source: https://github.com/video-dev/hls.js/
+Installed from the official npm package; see HLSJS-LICENSE for Apache-2.0 terms.

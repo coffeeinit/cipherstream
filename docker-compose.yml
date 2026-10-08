@@ -4,24 +4,12 @@ services:
     ports:
       - "8080:8080"
     environment:
-      CIPHERSTREAM_CONFIG: /app/config.toml
+      PORT: "8080"
+      DATA_DIR: /data
+      MAX_UPLOAD_BYTES: "${MAX_UPLOAD_BYTES:-4294967296}"
     volumes:
-      - cipherstream-data:/app/data
-
-  # S3/MinIO is intentionally deferred until the local beta is stable.
-  minio:
-    image: minio/minio:latest
-    profiles: ["s3"]
-    command: server /data --console-address ":9001"
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    environment:
-      MINIO_ROOT_USER: cipherstream
-      MINIO_ROOT_PASSWORD: cipherstream-secret
-    volumes:
-      - minio-data:/data
+      - cipherstream-data:/data
+    restart: unless-stopped
 
 volumes:
   cipherstream-data:
-  minio-data:

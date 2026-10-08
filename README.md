@@ -1,249 +1,123 @@
-# 🛡️ CipherStream
+# CipherStream
 
-<div align="center">
+**An importable Go package for upload → HLS conversion → streaming.**
 
-**One application – upload, transcode, package, and stream video.  
-Built to be extended, not rebuilt.**
+CipherStream is a small Go video service that accepts a video reader, stores the original, converts it to HLS with server-side FFmpeg, tracks conversion status, and serves the playlist and segments. The package has no third-party Go dependencies. FFmpeg and ffprobe must be installed on the server.
 
-</div>
-
-CipherStream is a **local-first video engine** for uploading a file, transcoding it with FFmpeg, packaging adaptive HLS, and serving it to a browser. The beta keeps the path deliberately small and reliable: SQLite metadata, local filesystem storage, one in-process job queue, and a built-in web UI. S3 storage and resumable uploads are planned follow-up backends.
-
----
-
-## ✨ What makes it special
-
-- **One codebase, one binary** – upload, queue, transcode, and stream run in one server process.
-- **Local by default** – SQLite metadata and local disk require no database or object-storage service.
-- **FFmpeg HLS** – produces 360p, 720p, and 1080p variants plus a master playlist.
-- **Built-in web UI** – choose a video file, monitor the job, and play the resulting HLS stream.
-
----
-
-## 🚀 Core Features (beta)
-
-| Feature | What it does |
-|---------|--------------|
-| **HTTP upload** | Upload a complete local video file with `POST /upload`. |
-| **Transcoding** | FFmpeg creates configured HLS renditions in a background worker. |
-| **HLS packaging** | Generates a master playlist and one variant playlist per rendition. |
-| **Local storage** | Stores uploads, HLS output, and SQLite metadata under `data/`. |
-| **Job status** | Poll `GET /api/videos/:id/status` while a job is queued or processing. |
-| **Web UI** | Select a file, monitor transcoding, and play the HLS master playlist. |
-
----
-
-## 🧩 Pluggable – extend without rewriting
-
-We believe in **convention over configuration, but extension over modification**.  
-The core engine is built around simple interfaces:
-
-```rust
-// Storage
-#[async_trait]
-pub trait Storage: Send + Sync {
-    async fn put(&self, key: &str, data: &mut dyn AsyncRead) -> Result<()>;
-    async fn get(&self, key: &str) -> Result<Box<dyn AsyncRead>>;
-    async fn signed_url(&self, key: &str, ttl: Duration) -> Result<String>;
-}
-
-// Queue
-#[async_trait]
-pub trait Queue: Send + Sync {
-    async fn publish(&self, job: Job) -> Result<()>;
-    async fn consume(&self) -> Result<Job>;
-}
-
-// Transcoder
-#[async_trait]
-pub trait Transcoder: Send + Sync {
-    async fn transcode(&self, job: Job) -> Result<()>;
-}
-
-// Auth
-#[async_trait]
-pub trait Auth: Send + Sync {
-    async fn authorize(&self, user_id: &str, video_id: &str) -> bool;
-}
-```
-
-**Drop in your own implementations** for:
-
-- Custom storage (Azure, Google Cloud, local with encryption)
-- Different queue backends (RabbitMQ, Kafka, NATS)
-- Alternative encoders (pure‑Rust `rav1e`, hardware‑specific)
-- Custom filters (watermark, logo, overlay, AI upscaling)
-- External DRM servers (Widevine, PlayReady)
-- Your user database / authentication system
-
-All through configuration or a few lines of code – no forking required.
-
----
-
-## 🏗️ Architecture (the single‑app view)
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                     CipherStream                        │
-│  ┌─────────────────────────────────────────────────┐   │
-│  │           HTTP Router (REST + WebSocket)        │   │
-│  └──────┬──────────────┬───────────────┬──────────┘   │
-│         │              │               │              │
-│  ┌──────▼─────┐ ┌──────▼─────┐ ┌──────▼─────┐      │
-│  │  Upload    │ │  Transcode │ │  Streaming │      │
-│  │  (TUS)     │ │  (parallel │ │  (signed   │      │
-│  │            │ │   FFmpeg)  │ │   URLs)    │      │
-│  └──────┬─────┘ └──────┬─────┘ └──────┬─────┘      │
-│         │              │               │              │
-│  ┌──────▼──────────────▼───────────────▼──────┐      │
-│  │         Plug‑in interfaces                  │      │
-│  │  (Storage, Queue, Transcoder, Auth, DRM)    │      │
-│  └──────────────────────────────────────────────┘      │
-│                         │                              │
-│  ┌──────────────────────▼──────────────────────┐      │
-│  │              Built‑in defaults               │      │
-│  │   (local disk, in‑mem queue, FFmpeg,        │      │
-│  │    JWT auth, signed URLs)                   │      │
-│  └──────────────────────────────────────────────┘      │
-└─────────────────────────────────────────────────────────┘
-```
-
-**All components live inside the same binary** – but they talk through interfaces, so you can replace any part without touching the rest.
-
----
-
-## 🔌 How to add your own feature
-
-1. **Identify the trait** you need to extend (see above).
-2. **Write your implementation** in Rust.
-3. **Register it** in the configuration file or via code.
-4. **Restart** – your feature is now live.
-
-**Example – adding a watermark filter**:
-
-```rust
-pub struct MyEncoder<E: Transcoder> {
-    base: E,
-}
-
-#[async_trait]
-impl<E: Transcoder> Transcoder for MyEncoder<E> {
-    async fn transcode(&self, job: Job) -> Result<()> {
-        // Add watermark using rust-ffmpeg filter graph
-        // ...
-        self.base.transcode(job).await
-    }
-}
-```
-
-Then register it: `config.Encoder = &MyEncoder{}`
-
-That's it – no other changes needed.
-
----
-
-## 🧪 Quick Start (single binary)
+## Use as a Go package
 
 ```bash
-# 1. Clone the repository
-git clone https://github.com/sudo-su-coffee/cipherstream.git
-cd cipherstream
-
-# 2. Install FFmpeg and build the server
-# Ubuntu: sudo apt-get install ffmpeg
-cargo build --release -p cipherstream-server
-
-# 3. Run with local storage and SQLite
-./target/release/cipherstream-server
-
-# 4. Open http://localhost:8080 and select a video
+go get github.com/coffeeinit/cipherstream
 ```
 
-The beta uses local storage by default. Edit `config.toml` only when you need to change the bind address,
-data directory, rendition ladder, or FFmpeg path:
+```go
+package main
 
-```toml
-[database]
-path = "data/cipherstream.db"
+import (
+	"context"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
 
-[storage]
-type = "local"
-data_dir = "data"
+	"github.com/coffeeinit/cipherstream"
+)
 
-[transcoder]
-ffmpeg_path = "/usr/bin/ffmpeg"
-parallelism = 4
+func main() {
+	service, err := cipherstream.New(cipherstream.Config{
+		DataDir: "./video-data",
+		Workers: 2,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer service.Close()
+
+	file, err := os.Open("input.mov")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer file.Close()
+
+	video, err := service.Upload(context.Background(), "input.mov", file, 23)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("video ID:", video.ID)
+	fmt.Println("HLS playlist:", cipherstream.PlaylistURL(video.ID))
+
+	mux := http.NewServeMux()
+	mux.Handle("GET /hls/", http.StripPrefix("/hls/", service.HLSHandler()))
+	log.Fatal(http.ListenAndServe(":8080", mux))
+}
 ```
 
-### Current runnable configuration
+`Upload` returns queued metadata. Poll with `video, found := service.GetVideo(id)` until `found && video.Status == "ready"`, then use `PlaylistURL(id)` or mount `HLSHandler()` under the route your app needs. `service.Handler()` provides the complete demo UI, JSON API, watch pages, and HLS routes. Call `Close()` during shutdown to stop workers.
 
-CipherStream uses TOML configuration. It loads `config.toml` by default, or the path in
-`CIPHERSTREAM_CONFIG`.
+### Public package API
+
+- `New(Config) (*Server, error)` — create storage and background conversion workers.
+- `(*Server).Upload(ctx, filename, reader, crf)` — store and queue an upload; CRF 0 selects the default 23, otherwise use 18–32.
+- `(*Server).GetVideo(id)` / `(*Server).Videos()` — read conversion status and metadata.
+- `(*Server).HLSHandler()` — mount HLS playlists, segments, and thumbnails on your own Go router.
+- `(*Server).Handler()` — run the included demo interface and HTTP API.
+- `PlaylistURL(id)` / `WatchURL(id)` — get same-origin demo paths.
+
+### Optional HTTP API
+
+The included handler exposes `POST /api/videos?crf=23` with a multipart `file` field, `GET /api/videos`, and `GET /api/videos/{id}` for status polling. Responses include the HLS playlist and watch-page paths. The browser demo accepts multiple files at `/upload`.
+
+## HLS playback
+
+The demo watch page uses the locally bundled [hls.js](https://github.com/video-dev/hls.js/) HLS client with custom controls. It loads the generated `.m3u8` playlist only; it does not play the uploaded source file or fall back to a browser-native HLS player. HLS.js uses browser MediaSource/video rendering support, so playback is unavailable in browsers without that support. The generated playlist can also be used by any HLS-compatible player.
+
+## Run the demo app
+
+Requirements: Go 1.22+ and FFmpeg with `ffmpeg` and `ffprobe` available on the server's `PATH`.
 
 ```bash
-cp config.example.toml config.toml
-CIPHERSTREAM_CONFIG=config.toml cargo build --release -p cipherstream-server
-CIPHERSTREAM_CONFIG=config.toml ./target/release/cipherstream-server
+go run ./cmd/cipherstream
 ```
 
-Docker Compose is also included for a local all-in-one run:
+Open <http://localhost:8080>. The upload form accepts multiple files without restricting extensions, shows queued/processing status, and offers CRF 18–32. FFmpeg probes each file: compatible H.264/AAC inputs are packaged without re-encoding; other readable video inputs are converted to H.264/AAC HLS. Accepted formats depend on the server's FFmpeg build, so unsupported, corrupt, audio-only, or DRM-protected files cannot be guaranteed.
+
+Or use Docker Compose, which installs FFmpeg in the server image and persists output:
 
 ```bash
 docker compose up --build
 ```
 
-The Docker image bakes a container-safe `/app/config.toml`; for host runs, copy and edit
-`config.example.toml`.
+Open <http://localhost:8080>. The default per-file upload limit is 4 GiB; set `MAX_UPLOAD_BYTES` to change it.
 
-The local storage backend is wired first and stores uploads/HLS output under `data/`.
-S3 storage, TUS resumable upload, authentication, and DRM are intentionally deferred until the
-local upload-to-HLS path is stable.
+## Configuration
 
----
+`cipherstream.Config` accepts `DataDir`, `FFmpegPath`, `FFprobePath`, `VideoEncoder`, `MaxUploadBytes`, and `Workers`. The demo command also reads these environment variables:
 
-## 📦 What's included (the complete package)
+| Variable | Default | Purpose |
+|---|---:|---|
+| `PORT` | `8080` | HTTP listen port/address. |
+| `DATA_DIR` | `data` | Root for original uploads, HLS output, and metadata. |
+| `MAX_UPLOAD_BYTES` | `4294967296` | Per-file upload limit; multipart batches share the same request ceiling. |
+| `FFMPEG_BIN` | `ffmpeg` | Server-side FFmpeg executable. |
+| `FFPROBE_BIN` | sibling `ffprobe` or PATH | Server-side ffprobe executable. |
+| `FFMPEG_VIDEO_ENCODER` | `libx264` | Encoder for inputs that need transcoding; the selected encoder must be present in FFmpeg. |
 
-- **Backend** – Rust, with one HTTP server and one in-process background worker.
-- **Frontend** – A small embedded browser UI with Vue and hls.js loaded from CDNs.
-- **FFmpeg** – Uses `ffmpeg` and `ffprobe` installed on the host or in the Docker image.
-- **Storage** – Local filesystem under `data/`.
-- **Database** – SQLite under `data/cipherstream.db`.
+## Storage layout
 
----
+```text
+data/
+  videos/<id>/
+    <id>.<source-extension>   # original upload
+    video.json                # status and metadata
+    index.m3u8                # HLS playlist
+    segment_00000.ts          # HLS media segments
+    thumbnail.jpg
+```
 
-## 📈 Scaling – from single instance to cluster
+Each video's source and HLS output are in the same directory. On startup, existing demo uploads found under the older `data/uploads/` layout are moved into their matching `data/videos/<id>/` folder.
 
-- **Single instance** – handles a moderate load (upload + transcode + stream).
-- **Add workers** – run multiple instances of the same binary, point them to the same queue/storage, and they'll automatically distribute transcoding jobs.
-- **Add CDN** – configure signed URLs to point to your CDN endpoint; segments are cached globally.
+This is a demo package, not a hosted SaaS: it has no authentication, retention policy, or access-control layer. Add those in the application that embeds it before exposing uploads or share links publicly.
 
----
+## License
 
-## 🗺️ Roadmap (already planned, but you can contribute)
-
-- [x] Resumable upload (TUS)
-- [x] Parallel chunked transcoding (FFmpeg)
-- [x] HLS packaging
-- [x] Signed‑URL delivery
-- [x] Web UI (Vue + hls.js)
-- [ ] DASH support
-- [ ] GPU acceleration (NVENC, VAAPI)
-- [ ] Real DRM (Widevine, PlayReady)
-- [ ] Live streaming (RTMP → HLS)
-
----
-
-## 🤝 Contributing – extend, improve, or plug in
-
-We welcome contributions of all kinds – new plugins, bug fixes, documentation, or entire new features.  
-Check out [CONTRIBUTING.md](CONTRIBUTING.md) and the [Plugin API](PLUGINS.md) guide to get started.
-
----
-
-## 📄 License
-
-[MIT](LICENSE) – use it freely, modify it, and make it your own.
-
----
-
-**CipherStream – a video engine that grows with you.**
+CipherStream is MIT licensed; see [LICENSE](LICENSE). The bundled HLS.js asset is Apache-2.0 licensed; see [web/HLSJS-LICENSE](web/HLSJS-LICENSE).
