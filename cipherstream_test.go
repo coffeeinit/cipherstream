@@ -118,7 +118,7 @@ func TestReusablePackageUploadAndPersistence(t *testing.T) {
 	if !ok || loaded.sourceFile == "" {
 		t.Fatalf("video metadata/source path did not reload: %#v, found=%v", loaded, ok)
 	}
-	if _, err := os.Stat(filepath.Join(dataDir, "uploads", loaded.sourceFile)); err != nil {
+	if _, err := os.Stat(filepath.Join(dataDir, "videos", video.ID, loaded.sourceFile)); err != nil {
 		t.Fatalf("stored input missing after restart: %v", err)
 	}
 	encoded, err := json.Marshal(loaded)
@@ -127,6 +127,43 @@ func TestReusablePackageUploadAndPersistence(t *testing.T) {
 	}
 	if strings.Contains(string(encoded), "source_file") {
 		t.Fatal("private source path leaked through the public Video type")
+	}
+}
+
+func TestLegacyUploadMigratesIntoVideoFolder(t *testing.T) {
+	dataDir := t.TempDir()
+	id := "abcdef0123456789abcdef01"
+	legacyDir := filepath.Join(dataDir, "uploads")
+	videoDir := filepath.Join(dataDir, "videos", id)
+	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(videoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	filename := id + ".mov"
+	legacyPath := filepath.Join(legacyDir, filename)
+	if err := os.WriteFile(legacyPath, []byte("legacy source"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	record := videoRecord{Video: Video{ID: id, Name: "legacy.mov", Status: "ready"}, SourceFile: filename}
+	data, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(videoDir, "video.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	service, err := New(Config{DataDir: dataDir, FFmpegPath: "/bin/false", FFprobePath: "/bin/false", Workers: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	if _, err := os.Stat(filepath.Join(videoDir, filename)); err != nil {
+		t.Fatalf("legacy source did not migrate: %v", err)
+	}
+	if _, err := os.Stat(legacyPath); !os.IsNotExist(err) {
+		t.Fatalf("legacy source still exists after migration: %v", err)
 	}
 }
 
@@ -143,6 +180,9 @@ func TestHLSHandlerAndJSONAPIs(t *testing.T) {
 	}
 	playlist := "#EXTM3U\n#EXT-X-ENDLIST\n"
 	if err := os.WriteFile(filepath.Join(videoDir, "index.m3u8"), []byte(playlist), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(videoDir, "private.mp4"), []byte("source"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	service.mu.Lock()
@@ -165,6 +205,11 @@ func TestHLSHandlerAndJSONAPIs(t *testing.T) {
 		if path == "/api/videos/"+id && !strings.Contains(recorder.Body.String(), `"playlist_url":"/hls/`+id) {
 			t.Errorf("API response did not include playlist URL: %s", recorder.Body.String())
 		}
+	}
+	privateRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(privateRecorder, httptest.NewRequest(http.MethodGet, "/hls/"+id+"/private.mp4", nil))
+	if privateRecorder.Code != http.StatusNotFound {
+		t.Fatalf("co-located source upload leaked through HLS handler: HTTP %d", privateRecorder.Code)
 	}
 
 	mux := http.NewServeMux()

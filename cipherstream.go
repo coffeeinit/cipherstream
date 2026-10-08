@@ -87,19 +87,19 @@ type probeResult struct {
 }
 
 type Server struct {
-	uploadDir   string
-	videoDir    string
-	ffmpeg      string
-	ffprobe     string
-	encoder     string
-	maxUpload   int64
-	videos      map[string]*Video
-	mu          sync.RWMutex
-	jobs        chan string
-	workerCount int
-	cancel      context.CancelFunc
-	workerCtx   context.Context
-	workerGroup sync.WaitGroup
+	videoDir        string
+	legacyUploadDir string
+	ffmpeg          string
+	ffprobe         string
+	encoder         string
+	maxUpload       int64
+	videos          map[string]*Video
+	mu              sync.RWMutex
+	jobs            chan string
+	workerCount     int
+	cancel          context.CancelFunc
+	workerCtx       context.Context
+	workerGroup     sync.WaitGroup
 }
 
 type homeData struct {
@@ -246,15 +246,12 @@ func newServer(dataDir, ffmpeg, encoder string, maxUpload int64, workers int) (*
 	if workers < 1 {
 		workers = 1
 	}
-	uploadDir := filepath.Join(dataDir, "uploads")
 	videoDir := filepath.Join(dataDir, "videos")
-	for _, dir := range []string{uploadDir, videoDir} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return nil, fmt.Errorf("create data directory %s: %w", dir, err)
-		}
+	if err := os.MkdirAll(videoDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create data directory %s: %w", videoDir, err)
 	}
 	a := &Server{
-		uploadDir: uploadDir, videoDir: videoDir,
+		videoDir: videoDir, legacyUploadDir: filepath.Join(dataDir, "uploads"),
 		ffmpeg: ffmpeg, ffprobe: siblingBinary(ffmpeg, "ffprobe"), encoder: encoder,
 		maxUpload: maxUpload, videos: make(map[string]*Video), jobs: make(chan string, 256), workerCount: workers,
 	}
@@ -290,6 +287,16 @@ func (a *Server) loadVideos() error {
 		}
 		video := record.Video
 		video.sourceFile = record.SourceFile
+		if video.sourceFile != "" {
+			storedName := filepath.Base(video.sourceFile)
+			videoPath := filepath.Join(a.videoDir, video.ID, storedName)
+			if _, statErr := os.Stat(videoPath); errors.Is(statErr, os.ErrNotExist) {
+				legacyPath := filepath.Join(a.legacyUploadDir, storedName)
+				if err := os.Rename(legacyPath, videoPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+					log.Printf("migrate video %s source into its video folder: %v", video.ID, err)
+				}
+			}
+		}
 		if video.Status == "processing" || video.Status == "queued" {
 			video.Status, video.Progress, video.Phase = "queued", 0, "Waiting to convert"
 		}
@@ -323,8 +330,8 @@ func (a *Server) processVideo(ctx context.Context, id string) {
 	if video == nil {
 		return
 	}
-	input := filepath.Join(a.uploadDir, filepath.Base(video.sourceFile))
 	output := filepath.Join(a.videoDir, id)
+	input := filepath.Join(output, filepath.Base(video.sourceFile))
 	if err := os.MkdirAll(output, 0o755); err != nil {
 		a.failVideo(id, err)
 		return
@@ -664,7 +671,11 @@ func (a *Server) storeUpload(ctx context.Context, filename string, source io.Rea
 		name = "video-upload"
 	}
 	storedName := id + safeExtension(filepath.Ext(name))
-	dest := filepath.Join(a.uploadDir, storedName)
+	videoPath := filepath.Join(a.videoDir, id)
+	if err := os.MkdirAll(videoPath, 0o755); err != nil {
+		return nil, err
+	}
+	dest := filepath.Join(videoPath, storedName)
 	out, err := os.OpenFile(dest, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, err
@@ -748,7 +759,7 @@ func (a *Server) handleWatch(w http.ResponseWriter, r *http.Request) {
 func (a *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	id, file := r.PathValue("id"), r.PathValue("file")
 	clean := filepath.Clean(filepath.FromSlash(file))
-	if !validID(id) || clean == "." || filepath.IsAbs(clean) || strings.HasPrefix(clean, ".."+string(filepath.Separator)) || clean == ".." {
+	if !validID(id) || clean == "." || filepath.IsAbs(clean) || strings.HasPrefix(clean, ".."+string(filepath.Separator)) || clean == ".." || filepath.Base(clean) != clean || !isHLSAsset(clean) {
 		http.NotFound(w, r)
 		return
 	}
@@ -778,6 +789,26 @@ func (a *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "public, max-age=3600")
 	http.ServeFile(w, r, path)
+}
+
+func isHLSAsset(name string) bool {
+	if name == "index.m3u8" || name == "thumbnail.jpg" {
+		return true
+	}
+	const prefix, suffix = "segment_", ".ts"
+	if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, suffix) {
+		return false
+	}
+	digits := strings.TrimSuffix(strings.TrimPrefix(name, prefix), suffix)
+	if len(digits) < 5 {
+		return false
+	}
+	for _, digit := range digits {
+		if digit < '0' || digit > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func (a *Server) handleStyle(w http.ResponseWriter, r *http.Request) {

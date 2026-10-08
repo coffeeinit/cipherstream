@@ -79,7 +79,7 @@ Requirements: Go 1.22+ and FFmpeg with `ffmpeg` and `ffprobe` available on the s
 go run ./cmd/cipherstream
 ```
 
-Open <http://localhost:8080>. The upload form accepts multiple videos, shows queued/processing status, and offers CRF 18–32. Compatible H.264/AAC inputs are packaged without re-encoding. Other readable inputs are converted to H.264/AAC HLS. Accepted input formats depend on the server's FFmpeg build.
+Open <http://localhost:8080>. The upload form accepts multiple files without restricting extensions, shows queued/processing status, and offers CRF 18–32. FFmpeg probes each file: compatible H.264/AAC inputs are packaged without re-encoding; other readable video inputs are converted to H.264/AAC HLS. Accepted formats depend on the server's FFmpeg build, so unsupported, corrupt, audio-only, or DRM-protected files cannot be guaranteed.
 
 Or use Docker Compose, which installs FFmpeg in the server image and persists output:
 
@@ -106,12 +106,15 @@ Open <http://localhost:8080>. The default per-file upload limit is 4 GiB; set `M
 
 ```text
 data/
-  uploads/<id>.<source-extension>
-  videos/<id>/video.json
-  videos/<id>/index.m3u8
-  videos/<id>/segment_00000.ts
-  videos/<id>/thumbnail.jpg
+  videos/<id>/
+    <id>.<source-extension>   # original upload
+    video.json                # status and metadata
+    index.m3u8                # HLS playlist
+    segment_00000.ts          # HLS media segments
+    thumbnail.jpg
 ```
+
+Each video's source and HLS output are in the same directory. On startup, existing demo uploads found under the older `data/uploads/` layout are moved into their matching `data/videos/<id>/` folder.
 
 This is a demo package, not a hosted SaaS: it has no authentication, retention policy, or access-control layer. Add those in the application that embeds it before exposing uploads or share links publicly.
 

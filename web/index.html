@@ -108,13 +108,13 @@
     <section class="upload-grid">
       <form class="card upload-card" action="/upload" method="post" enctype="multipart/form-data">
         <div class="card-head"><h2>Start with a video</h2><span class="step">01 / UPLOAD</span></div>
-        <label class="file-pick" for="file"><span class="upload-icon" aria-hidden="true">↑</span><strong>Choose one or more video files</strong><span class="pick-copy">Any format your server's FFmpeg build can read.</span><span class="button secondary">Browse videos</span><small>Maximum {{.MaxUploadLabel}} per file · Files stay on this server</small></label>
-        <input class="file-input" id="file" name="file" type="file" accept="video/*,.mkv,.avi,.mov,.wmv,.flv,.m4v,.webm" multiple required>
+        <label class="file-pick" for="file"><span class="upload-icon" aria-hidden="true">↑</span><strong>Choose one or more video files</strong><span class="pick-copy">Any format this server's FFmpeg build can read.</span><span class="button secondary">Browse videos</span><small>Maximum {{.MaxUploadLabel}} per file · Files stay on this server</small></label>
+        <input class="file-input" id="file" name="file" type="file" multiple required>
         <div class="quality-control"><label for="crf">H.264 quality <span>CRF 18–32</span></label><div class="quality-explainer">Choose the quality level for videos that need re-encoding.</div><input id="crf" name="crf" type="number" value="23" min="18" max="32" aria-label="CRF value from 18 to 32"><small>18 = higher quality · 32 = smaller file · Already H.264 + AAC? It is packaged without re-encoding.</small></div>
         <button class="button primary" type="submit">Upload &amp; convert <span>→</span></button>
         <p class="form-note">Conversion runs in the background. This page refreshes while jobs are processing.</p>
       </form>
-      <aside class="card settings-card"><div class="card-head"><div><h2>One job, end to end</h2><p>No accounts, cloud storage, or setup screen.</p></div><span class="step">02 / STREAM</span></div><div class="steps"><div><span>01</span><p><strong>Upload</strong><br>Choose multiple videos in one go.</p></div><div><span>02</span><p><strong>Convert</strong><br>H.264 + AAC HLS, with a thumbnail.</p></div><div><span>03</span><p><strong>Share</strong><br>Share the HLS.js watch page or playlist.</p></div></div><div class="local-callout"><i></i><span>Stored locally under <code>data/</code></span></div></aside>
+      <aside class="card settings-card"><div class="card-head"><div><h2>One job, end to end</h2><p>No accounts, cloud storage, or setup screen.</p></div><span class="step">02 / STREAM</span></div><div class="steps"><div><span>01</span><p><strong>Upload</strong><br>Choose multiple videos in one go.</p></div><div><span>02</span><p><strong>Convert</strong><br>H.264 + AAC HLS, with a thumbnail.</p></div><div><span>03</span><p><strong>Share</strong><br>Share the HLS.js watch page or playlist.</p></div></div><div class="local-callout"><i></i><span>One folder per video under <code>data/videos/</code></span></div></aside>
     </section>
     <section class="library"><div class="section-head"><div><div class="eyebrow">YOUR COLLECTION</div><h2>Videos</h2></div><span class="count">{{len .Videos}} VIDEO{{if ne (len .Videos) 1}}S{{end}}</span></div>
       {{if .Videos}}<div class="video-list">{{range .Videos}}
